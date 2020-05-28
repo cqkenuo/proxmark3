@@ -9,16 +9,8 @@
 //-----------------------------------------------------------------------------
 // 2020, added Python support (@iceman100)
 
-
 #include <stdlib.h>
 #include <string.h>
-
-#ifdef HAVE_PYTHON
-//#define PY_SSIZE_T_CLEAN
-#include <Python.h>
-#include <wchar.h>
-#endif
-
 
 #include "cmdparser.h"    // command_t
 #include "scripting.h"
@@ -32,6 +24,19 @@
 #include "proxmark3.h"
 #include "ui.h"
 #include "fileutils.h"
+
+#ifdef HAVE_LUA_SWIG
+extern int luaopen_pm3(lua_State* L);
+#endif
+
+#ifdef HAVE_PYTHON
+//#define PY_SSIZE_T_CLEAN
+#include <Python.h>
+#include <wchar.h>
+#ifdef HAVE_PYTHON_SWIG
+extern PyObject* PyInit__pm3(void);
+#endif
+#endif
 
 typedef enum {
     PM3_UNSPECIFIED,
@@ -211,7 +216,9 @@ static int CmdScriptRun(const char *Cmd) {
 
         //Add the 'bit' library
         set_bit_library(lua_state);
-
+#ifdef HAVE_LUA_SWIG
+        luaL_requiref(lua_state, "pm3", luaopen_pm3, 1);
+#endif
         error = luaL_loadfile(lua_state, script_path);
         free(script_path);
         if (!error) {
@@ -292,6 +299,10 @@ static int CmdScriptRun(const char *Cmd) {
 
         // optional but recommended
         Py_SetProgramName(program);
+#ifdef HAVE_PYTHON_SWIG
+        // hook Proxmark3 API
+        PyImport_AppendInittab("_pm3", PyInit__pm3);
+#endif
         Py_Initialize();
 
         //int argc, char ** argv
