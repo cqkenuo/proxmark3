@@ -49,20 +49,77 @@ if (NOT SKIPPYTHON EQUAL 1)
     pkg_search_module(PYTHON3EMBED QUIET python3-embed)
 endif (NOT SKIPPYTHON EQUAL 1)
 
+# If build on android cross, we need to init source and build.
+if (ANDROID)
+    set(CFLAGS_EXTERNAL_LIB CFLAGS=--target=${CMAKE_C_COMPILER_TARGET})
+    include(ExternalProject)
+endif (ANDROID)
+
 if (NOT SKIPREADLINE EQUAL 1)
     if (APPLE)
       find_path(READLINE_INCLUDE_DIRS readline/readline.h /usr/local/opt/readline/include /opt/local/include /opt/include /usr/local/include /usr/include NO_DEFAULT_PATH)
-    endif (APPLE)
-    find_path(READLINE_INCLUDE_DIRS readline/readline.h)
-
-    if (APPLE)
       find_library(READLINE_LIBRARIES readline /usr/local/opt/readline/lib /opt/local/lib /opt/lib /usr/local/lib /usr/lib NO_DEFAULT_PATH)
     endif (APPLE)
-    find_library(READLINE_LIBRARIES readline)
+    if (ANDROID)
+        set(READLINE_INSTALL
+            COMMAND mv ${CMAKE_CURRENT_SOURCE_DIR}/deps/readline/src/readline/libreadline.a ${CMAKE_CURRENT_SOURCE_DIR}/deps/
+            COMMAND mv ${CMAKE_CURRENT_SOURCE_DIR}/deps/readline/src/readline/libhistory.a ${CMAKE_CURRENT_SOURCE_DIR}/deps/
+        )
+        ExternalProject_Add(ncurses
+            URL                   http://ftp.gnu.org/pub/gnu/ncurses/ncurses-6.0.tar.gz
+            DOWNLOAD_NAME         ncurses.zip
+            PREFIX                ${CMAKE_CURRENT_SOURCE_DIR}/deps/ncurses
+            CONFIGURE_COMMAND     ./configure CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER} LD=${CMAKE_C_COMPILER} AR=${CMAKE_AR} RANLIB=${CMAKE_RANLIB} ${CFLAGS_EXTERNAL_LIB} --host=arm
+            BUILD_IN_SOURCE       ON
+            BUILD_COMMAND         make -j2 libs
+            INSTALL_COMMAND       ""
+            LOG_DOWNLOAD          ON
+        )
+        ExternalProject_Add_StepTargets(ncurses configure build install)
+
+        ExternalProject_Add(readline
+            URL                   ftp://ftp.gnu.org/gnu/readline/readline-7.0.tar.gz
+            DOWNLOAD_NAME         readline.zip
+            PREFIX                ${CMAKE_CURRENT_SOURCE_DIR}/deps/readline
+            CONFIGURE_COMMAND     ./configure CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER} LD=${CMAKE_C_COMPILER} AR=${CMAKE_AR} RANLIB=${CMAKE_RANLIB} ${CFLAGS_EXTERNAL_LIB} --host=arm --enable-static
+            BUILD_IN_SOURCE       ON
+            BUILD_COMMAND         make -j2
+            INSTALL_COMMAND       ${READLINE_INSTALL}
+            LOG_DOWNLOAD          ON
+        )
+        ExternalProject_Add_StepTargets(readline configure build install)
+        set(READLINE_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/deps/readline/src/)
+        set(READLINE_LIBRARIES ${CMAKE_CURRENT_SOURCE_DIR}/deps/libreadline.a ${CMAKE_CURRENT_SOURCE_DIR}/deps/ncurses/src/ncurses/lib/libncurses.a)
+    else (ANDROID)
+        find_path(READLINE_INCLUDE_DIRS readline/readline.h)
+        find_library(READLINE_LIBRARIES readline)
+    endif (ANDROID)
     if (READLINE_INCLUDE_DIRS AND READLINE_LIBRARIES)
         set(READLINE_FOUND ON)
     endif (READLINE_INCLUDE_DIRS AND READLINE_LIBRARIES)
 endif (NOT SKIPREADLINE EQUAL 1)
+
+if(ANDROID)
+    ExternalProject_Add(bzip2
+        GIT_REPOSITORY        https://android.googlesource.com/platform/external/bzip2
+        GIT_TAG               master
+        PREFIX                ${CMAKE_CURRENT_SOURCE_DIR}/deps/bzip2
+        CONFIGURE_COMMAND     ""
+        UPDATE_COMMAND        ""
+        BUILD_IN_SOURCE       ON
+        BUILD_COMMAND         make -j4 CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER} LD=${CMAKE_C_COMPILER} AR=${CMAKE_AR} RANLIB=${CMAKE_RANLIB} ${CFLAGS_EXTERNAL_LIB} libbz2.a
+        INSTALL_COMMAND       mv ${CMAKE_CURRENT_SOURCE_DIR}/deps/bzip2/src/bzip2/libbz2.a ${CMAKE_CURRENT_SOURCE_DIR}/deps/
+        LOG_DOWNLOAD          ON
+    )
+    ExternalProject_Add_StepTargets(bzip2 configure build install)
+    set(BZIP2_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/deps/bzip2/src/bzip2)
+    set(BZIP2_LIBRARIES ${CMAKE_CURRENT_SOURCE_DIR}/deps/libbz2.a)
+else()
+    set(BZIP2_LIBRARIES bz2)
+endif(ANDROID)
+if (BZIP2_LIBRARIES)
+    set(BZIP2_FOUND ON)
+endif (BZIP2_LIBRARIES)
 
 add_subdirectory(${PM3_ROOT}/client/deps deps)
 
@@ -268,6 +325,12 @@ if (NOT SKIPREADLINE EQUAL 1)
         set(ADDITIONAL_LNK ${READLINE_LIBRARIES} ${ADDITIONAL_LNK})
     endif (READLINE_FOUND)
 endif(NOT SKIPREADLINE EQUAL 1)
+if (BZIP2_FOUND)
+    set(ADDITIONAL_DIRS ${BZIP2_INCLUDE_DIRS} ${ADDITIONAL_DIRS})
+    set(ADDITIONAL_LNK ${BZIP2_LIBRARIES} ${ADDITIONAL_LNK})
+else (BZIP2_FOUND)
+    message(FATAL_ERROR "Bzip2 not found")
+endif (BZIP2_FOUND)
 
 message("===================================================================")
 if (SKIPQT EQUAL 1)
@@ -320,6 +383,12 @@ add_executable(proxmark3
 )
 
 target_compile_options(proxmark3 PUBLIC -Wall -Werror -O3)
+if (ANDROID)
+    if (NOT SKIPREADLINE EQUAL 1)
+        add_dependencies(proxmark3 ncurses readline)
+    endif (NOT SKIPREADLINE EQUAL 1)
+    add_dependencies(proxmark3 bzip2)
+endif (ANDROID)
 
 if (MINGW)
     # Mingw uses by default Microsoft printf, we want the GNU printf (e.g. for %z)
@@ -357,7 +426,6 @@ find_library(pm3rrg_rdv4_hardnested REQUIRED)
 find_library(pm3rrg_rdv4_whereami REQUIRED)
 
 target_link_libraries(proxmark3 PRIVATE
-        bz2
         m
         pm3rrg_rdv4_mbedtls
         pm3rrg_rdv4_cliparser
