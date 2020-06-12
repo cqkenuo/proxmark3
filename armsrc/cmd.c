@@ -96,14 +96,14 @@ static int reply_ng_internal(uint16_t cmd, int16_t status, uint8_t *data, size_t
     txBufferNG.pre.cmd = cmd;
     txBufferNG.pre.status = status;
     txBufferNG.pre.ng = ng;
-    if (len > PM3_CMD_DATA_SIZE) {
-        len = PM3_CMD_DATA_SIZE;
+    if (len > sizeof(txBufferNG.data)) {
+        len = sizeof(txBufferNG.data);
         // overwrite status
         txBufferNG.pre.status = PM3_EOVFLOW;
     }
     txBufferNG.pre.length = len;
 
-    // Add the (optional) content to the frame, with a maximum size of PM3_CMD_DATA_SIZE
+    // Add the (optional) content to the frame, with a maximum size of PM3_CMD_DATA_SIZE_NG
     if (data && len) {
         for (size_t i = 0; i < len; i++) {
             txBufferNG.data[i] = data[i];
@@ -152,11 +152,11 @@ int reply_ng(uint16_t cmd, int16_t status, uint8_t *data, size_t len) {
 int reply_mix(uint64_t cmd, uint64_t arg0, uint64_t arg1, uint64_t arg2, void *data, size_t len) {
     uint16_t status = PM3_SUCCESS;
     uint64_t arg[3] = {arg0, arg1, arg2};
-    if (len > PM3_CMD_DATA_SIZE - sizeof(arg)) {
-        len = PM3_CMD_DATA_SIZE - sizeof(arg);
+    if (len > PM3_CMD_DATA_SIZE_NG - sizeof(arg)) {
+        len = PM3_CMD_DATA_SIZE_NG - sizeof(arg);
         status = PM3_EOVFLOW;
     }
-    uint8_t cmddata[PM3_CMD_DATA_SIZE];
+    uint8_t cmddata[PM3_CMD_DATA_SIZE_NG];
     memcpy(cmddata, arg, sizeof(arg));
     if (len && data)
         memcpy(cmddata + sizeof(arg), data, len);
@@ -180,7 +180,7 @@ static int receive_ng_internal(PacketCommandNG *rx, uint32_t read_ng(uint8_t *da
     rx->cmd = rx_raw.pre.cmd;
 
     if (rx->magic == COMMANDNG_PREAMBLE_MAGIC) { // New style NG command
-        if (length > PM3_CMD_DATA_SIZE)
+        if (length > sizeof(rx_raw.data))
             return PM3_EOVFLOW;
 
         // Get the core and variable length payload
